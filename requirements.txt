@@ -1,9 +1,5 @@
 streamlit
-selenium
 beautifulsoup4
 python-dotenv
 pandas
-webdriver_manager
-selenium-wire
-chromedriver-autoinstaller
-chromium-browser 
+requests 
