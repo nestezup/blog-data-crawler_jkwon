@@ -15,8 +15,19 @@ def setup_chrome_driver():
     chrome_options.add_argument("--headless")  # 백그라운드 실행
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_experimental_option("detach", True)
-    return webdriver.Chrome(options=chrome_options)
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-features=NetworkService")
+    chrome_options.add_argument("--window-size=1920x1080")
+    chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+    chrome_options.add_argument('--ignore-certificate-errors')
+    chrome_options.add_argument('--allow-running-insecure-content')
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--proxy-server='direct://'")
+    chrome_options.add_argument("--proxy-bypass-list=*")
+    chrome_options.add_argument("--start-maximized")
+    
+    service = Service()
+    return webdriver.Chrome(service=service, options=chrome_options)
 
 def crawl_blog(keyword, num_posts):
     results = []
