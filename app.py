@@ -15,45 +15,70 @@ class NaverBlogCrawler:
     def search_blogs(self, keyword, num_posts=1):
         """네이버 블로그 검색 및 데이터 수집"""
         results = []
+        page = 1
+        collected = 0
         
-        # 검색 URL 생성
-        encoded_keyword = quote(keyword)
-        search_url = f"https://search.naver.com/search.naver?where=blog&query={encoded_keyword}"
-        
-        # 검색 결과 페이지 가져오기
-        response = requests.get(search_url, headers=self.headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # 블로그 포스트 목록 추출
-        blog_items = soup.select(".api_txt_lines.total_tit")[:num_posts]
-        
-        for index, item in enumerate(blog_items, 1):
-            blog_data = {
-                "번호": index,
-                "제목": item.text.strip(),
-                "링크": item['href'],
-                "본문": ""
-            }
+        while collected < num_posts:
+            # 검색 URL 생성 (페이지네이션 포함)
+            encoded_keyword = quote(keyword)
+            search_url = f"https://search.naver.com/search.naver?where=blog&query={encoded_keyword}&start={1 + (page-1)*10}"
             
-            # 티스토리 블로그 건너뛰기
-            if "tistory.com" in blog_data['링크']:
-                continue
+            # 검색 결과 페이지 가져오기
+            response = requests.get(search_url, headers=self.headers)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 블로그 포스트 목록 추출
+            blog_items = soup.select(".api_txt_lines.total_tit")
+            if not blog_items:  # 더 이상 결과가 없으면 종료
+                break
                 
-            try:
-                # 본문 가져오기
-                if "post.naver.com" in blog_data['링크']:
-                    content = self.get_naver_post_content(blog_data['링크'])
-                else:
-                    content = self.get_naver_blog_content(blog_data['링크'])
+            for item in blog_items:
+                if collected >= num_posts:
+                    break
                     
-                blog_data["본문"] = content
-                results.append(blog_data)
-                time.sleep(1)  # 요청 간격 조절
+                blog_data = {
+                    "번호": collected + 1,
+                    "제목": item.text.strip(),
+                    "링크": item['href'],
+                    "본문": "",
+                    "작성자": "",
+                    "작성일": ""
+                }
                 
-            except Exception as e:
-                blog_data["본문"] = f"크롤링 실패: {str(e)}"
-                results.append(blog_data)
+                # 티스토리 블로그 건너뛰기
+                if "tistory.com" in blog_data['링크']:
+                    continue
                 
+                try:
+                    # 작성자 정보 추출
+                    writer_elem = item.find_parent().find_parent().select_one(".sub_txt.sub_name")
+                    if writer_elem:
+                        blog_data["작성자"] = writer_elem.text.strip()
+                    
+                    # 작성일 추출
+                    date_elem = item.find_parent().find_parent().select_one(".sub_txt.sub_date")
+                    if date_elem:
+                        blog_data["작성일"] = date_elem.text.strip()
+                    
+                    # 본문 가져오기
+                    if "post.naver.com" in blog_data['링크']:
+                        content = self.get_naver_post_content(blog_data['링크'])
+                    else:
+                        content = self.get_naver_blog_content(blog_data['링크'])
+                        
+                    blog_data["본문"] = content
+                    results.append(blog_data)
+                    collected += 1
+                    time.sleep(1)  # 요청 간격 조절
+                    
+                except Exception as e:
+                    blog_data["본문"] = f"크롤링 실패: {str(e)}"
+                    results.append(blog_data)
+                    collected += 1
+                    
+            page += 1
+            time.sleep(1)  # 페이지 요청 간격 조절
+                    
         return pd.DataFrame(results)
     
     def get_naver_post_content(self, url):
@@ -74,28 +99,46 @@ class NaverBlogCrawler:
     
     def get_naver_blog_content(self, url):
         """네이버 블로그 본문 추출"""
-        # 실제 블로그 URL 추출
-        if "blog.naver.com" in url:
-            blog_id = re.search(r'blog.naver.com/([^?/]+)', url).group(1)
-            log_no = re.search(r'logNo=(\d+)', url).group(1)
-            url = f"https://blog.naver.com/PostView.naver?blogId={blog_id}&logNo={log_no}"
-            
-        response = requests.get(url, headers=self.headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # iframe 내부 컨텐츠 가져오기
-        if "blog.naver.com" in url:
-            iframe_url = soup.select_one("#mainFrame")['src']
-            if not iframe_url.startswith('http'):
-                iframe_url = f"https://blog.naver.com{iframe_url}"
-            response = requests.get(iframe_url, headers=self.headers)
+        try:
+            # 실제 블로그 URL 추출
+            if "blog.naver.com" in url:
+                blog_id = re.search(r'blog.naver.com/([^?/]+)', url).group(1)
+                log_no = re.search(r'logNo=(\d+)', url).group(1)
+                url = f"https://blog.naver.com/PostView.naver?blogId={blog_id}&logNo={log_no}"
+                
+            response = requests.get(url, headers=self.headers)
             soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # 본문 추출
-        content = soup.select_one("div.se-main-container")
-        if content:
-            return content.get_text(strip=True)
-        return "본문을 찾을 수 없습니다."
+            
+            # iframe 내부 컨텐츠 가져오기
+            if "blog.naver.com" in url:
+                iframe_url = soup.select_one("#mainFrame")['src']
+                if not iframe_url.startswith('http'):
+                    iframe_url = f"https://blog.naver.com{iframe_url}"
+                response = requests.get(iframe_url, headers=self.headers)
+                soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 여러 버전의 블로그 템플릿 지원
+            content = None
+            
+            # 최신 버전 (se-main-container)
+            content = soup.select_one("div.se-main-container")
+            if content:
+                return content.get_text(strip=True)
+                
+            # 구버전 (post-view)
+            content = soup.select_one("div.post-view")
+            if content:
+                return content.get_text(strip=True)
+                
+            # 더 오래된 버전
+            content = soup.select_one("div#postViewArea")
+            if content:
+                return content.get_text(strip=True)
+                
+            return "본문을 찾을 수 없습니다."
+            
+        except Exception as e:
+            return f"본문 추출 실패: {str(e)}"
 
 # Streamlit UI 설정
 st.set_page_config(
