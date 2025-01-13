@@ -9,25 +9,39 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
 from io import StringIO
+import chromedriver_autoinstaller
+import subprocess
 
 def setup_chrome_driver():
+    # Chrome 설치 확인 및 설치
+    try:
+        subprocess.Popen(
+            ['google-chrome', '--version'], 
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+    except:
+        CHROME_INSTALL_CMD = """
+        apt-get update
+        apt-get install -y google-chrome-stable
+        """
+        subprocess.Popen(CHROME_INSTALL_CMD, shell=True)
+    
+    # ChromeDriver 자동 설치
+    chromedriver_autoinstaller.install()
+    
+    # Chrome 옵션 설정
     chrome_options = Options()
-    chrome_options.add_argument("--headless")  # 백그라운드 실행
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-features=NetworkService")
-    chrome_options.add_argument("--window-size=1920x1080")
-    chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+    chrome_options.add_argument('--disable-blink-features=AutomationControlled')
     chrome_options.add_argument('--ignore-certificate-errors')
-    chrome_options.add_argument('--allow-running-insecure-content')
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--proxy-server='direct://'")
-    chrome_options.add_argument("--proxy-bypass-list=*")
-    chrome_options.add_argument("--start-maximized")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
     
-    service = Service()
-    return webdriver.Chrome(service=service, options=chrome_options)
+    return webdriver.Chrome(options=chrome_options)
 
 def crawl_blog(keyword, num_posts):
     results = []
@@ -164,51 +178,66 @@ def get_naver_blog_content(driver):
     )
     return content.text.strip()
 
-# Streamlit UI
-st.title("블로그 크롤러")
+# 메인 UI 부분 수정
+st.set_page_config(
+    page_title="네이버 블로그 크롤러",
+    page_icon="🤖",
+    layout="wide"
+)
+
+st.title("네이버 블로그 크롤러 🤖")
+
+with st.expander("ℹ️ 사용 방법", expanded=True):
+    st.markdown("""
+    1. 검색어를 입력하세요
+    2. 크롤링할 게시물 수를 선택하세요 (최대 20개)
+    3. '크롤링 시작' 버튼을 클릭하세요
+    4. 크롤링이 완료되면 결과를 CSV 파일로 다운로드할 수 있습니다
+    
+    ⚠️ **주의사항**
+    - 크롤링은 시간이 걸릴 수 있습니다
+    - 네트워크 상태에 따라 일부 게시물은 수집되지 않을 수 있습니다
+    """)
 
 # 사이드바에 입력 폼 배치
 with st.sidebar:
     st.header("크롤링 설정")
     keyword = st.text_input("검색어를 입력하세요", "파이썬 selenium")
-    num_posts = st.number_input("크롤링할 게시물 수", min_value=1, max_value=20, value=5)
-    start_crawl = st.button("크롤링 시작")
+    num_posts = st.number_input("크롤링할 게시물 수", 
+                               min_value=1, 
+                               max_value=20, 
+                               value=5,
+                               help="한 번에 최대 20개까지 크롤링할 수 있습니다")
+    
+    start_crawl = st.button("크롤링 시작", 
+                           help="버튼을 클릭하면 크롤링이 시작됩니다",
+                           type="primary")
 
 # 메인 화면
 if start_crawl:
-    st.info(f"'{keyword}' 키워드로 {num_posts}개의 게시물을 크롤링합니다...")
-    
-    # 진행 상태바 표시
-    progress_bar = st.progress(0)
-    
     try:
-        # 크롤링 실행
-        df = crawl_blog(keyword, num_posts)
-        
-        # 결과 표시
-        st.success("크롤링이 완료되었습니다!")
-        st.dataframe(df)
-        
-        # CSV 다운로드 버튼
-        csv = df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label="CSV 파일 다운로드",
-            data=csv,
-            file_name=f"blog_crawling_{keyword}.csv",
-            mime="text/csv"
-        )
-        
+        with st.spinner(f"'{keyword}' 키워드로 {num_posts}개의 게시물을 크롤링하고 있습니다..."):
+            df = crawl_blog(keyword, num_posts)
+            
+            if len(df) > 0:
+                st.success("크롤링이 완료되었습니다! 🎉")
+                
+                # 결과 표시
+                st.subheader("크롤링 결과")
+                st.dataframe(df, use_container_width=True)
+                
+                # CSV 다운로드 버튼
+                csv = df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="📥 CSV 파일 다운로드",
+                    data=csv,
+                    file_name=f"blog_crawling_{keyword}.csv",
+                    mime="text/csv",
+                    help="크롤링 결과를 CSV 파일로 다운로드합니다"
+                )
+            else:
+                st.warning("크롤링된 데이터가 없습니다. 다른 검색어로 시도해보세요.")
+                
     except Exception as e:
         st.error(f"크롤링 중 오류가 발생했습니다: {str(e)}")
-    
-    finally:
-        progress_bar.empty()
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("""
-### 사용 방법
-1. 검색어를 입력하세요
-2. 크롤링할 게시물 수를 선택하세요
-3. '크롤링 시작' 버튼을 클릭하세요
-4. 결과를 확인하고 CSV 파일로 다운로드하세요
-""") 
+        st.info("잠시 후 다시 시도해주세요.") 
